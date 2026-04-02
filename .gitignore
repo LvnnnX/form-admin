@@ -1,0 +1,20 @@
+node_modules/
+dist/
+
+.vercel/
+.vscode/
+.idea/
+
+.DS_Store
+Thumbs.db
+
+# Environment variables (keep the example file)
+.env
+.env.*
+.env.example
+
+*.md
+
+# Logs
+*.log
+
