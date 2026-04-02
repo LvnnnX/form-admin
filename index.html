@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Registrasi KTP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ['Plus Jakarta Sans', 'sans-serif'] },
+            colors: {
+              primary: { 50: '#eef2ff', 100: '#e0e7ff', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' },
+              success: { 500: '#10b981', 600: '#059669' },
+              danger: { 500: '#ef4444', 600: '#dc2626' },
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      * { font-family: 'Plus Jakarta Sans', sans-serif; }
+      .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+      .card-shadow { box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); }
+      .input-focus:focus { box-shadow: 0 0 0 4px rgba(99,102,241,0.1); }
+      @keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+      @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(120%); opacity: 0; } }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes confetti { 0% { top: -10px; opacity: 1; } 100% { top: 100%; opacity: 0; transform: rotate(720deg); } }
+      .toast-enter { animation: slideIn 0.4s ease; }
+      .toast-exit { animation: slideOut 0.3s ease forwards; }
+      .spinner { border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; }
+      .btn-hover:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(99,102,241,0.4); }
+      .btn-hover { transition: all 0.2s; }
+    </style>
+  </head>
+  <body class="gradient-bg min-h-screen">
+    <div id="app"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
