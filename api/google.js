@@ -22,7 +22,7 @@ export default async function handler(req, res) {
     // Ini akan menghapus tanda kutip (") dan spasi yang sering bikin error di Vercel
     const clientEmail = (process.env.VITE_GOOGLE_CLIENT_EMAIL || '').replace(/"/g, '').trim();
     const privateKey = (process.env.VITE_GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n').replace(/"/g, '').trim();
-    const pinAdmin = (process.env.VITE_PIN_ADMIN || '').replace(/"/g, '').trim();
+    const pinAdmin = (process.env.VITE_ADMIN_PIN || '').replace(/"/g, '').trim();
     const sheetId = (process.env.VITE_GOOGLE_SHEET_ID || '').replace(/"/g, '').trim();
     const folderId = (process.env.VITE_GOOGLE_FOLDER_ID || '').replace(/"/g, '').trim();
 
