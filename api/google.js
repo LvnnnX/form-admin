@@ -2,170 +2,48 @@ import { google } from 'googleapis';
 import { PassThrough } from 'stream';
 
 export const config = {
-  api: {
-    bodyParser: { sizeLimit: '10mb' },
-  },
+  api: { bodyParser: { sizeLimit: '10mb' } },
 };
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, message: 'Method Not Allowed' });
-  }
-
+  if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method Not Allowed' });
   try {
     const { action, payload } = req.body;
-
-    // ====================================================================
-    // 1. ENVIRONMENT VARIABLES (SERVER-SIDE, NO VITE_ PREFIX!)
-    // ====================================================================
-    // NOTE: VITE_ prefix = client-side only. Server routes use plain env vars.
-    
-    // Try full credentials JSON first, then individual vars
     let credentials = null;
     const credsJson = process.env.GOOGLE_CREDENTIALS || process.env.VITE_GOOGLE_CREDENTIALS;
-    if (credsJson) {
-      try {
-        credentials = JSON.parse(credsJson.replace(/\\n/g, '\n'));
-      } catch (e) {
-        // Try as individual vars
-      }
-    }
-    
-    // Fall back to individual env vars
-    let clientEmail = credentials?.client_email || process.env.GOOGLE_CLIENT_EMAIL || process.env.VITE_GOOGLE_CLIENT_EMAIL || '';
+    if (credsJson) { try { credentials = JSON.parse(credsJson); } catch (e) { try { credentials = JSON.parse(credsJson.replace(/\\n/g, '\n')); } catch (e2) {} } }
+    const clientEmail = credentials?.client_email || process.env.GOOGLE_CLIENT_EMAIL || process.env.VITE_GOOGLE_CLIENT_EMAIL || '';
     let privateKey = credentials?.private_key || process.env.GOOGLE_PRIVATE_KEY || process.env.VITE_GOOGLE_PRIVATE_KEY || '';
-    let pinAdmin = process.env.ADMIN_PIN || process.env.VITE_ADMIN_PIN || '';
-    let sheetId = process.env.GOOGLE_SHEET_ID || process.env.VITE_GOOGLE_SHEET_ID || '';
-    let folderId = process.env.GOOGLE_FOLDER_ID || process.env.VITE_GOOGLE_FOLDER_ID || '';
-
-    // Menghapus tanda kutip tunggal/ganda di awal & akhir yang sering nyantung
-    clientEmail = clientEmail.replace(/^['"']|['"']$/g, '').trim();
-    pinAdmin = pinAdmin.replace(/^['"']|['"']$/g, '').trim();
-    sheetId = sheetId.replace(/^['"']|['"']$/g, '').trim();
-    folderId = folderId.replace(/^['"']|['"']$/g, '').trim();
-
-    // PERBAIKAN KRUSIAL UNTUK PRIVATE KEY (Invalid JWT Signature)
-    // Menghapus kutip, lalu mengubah teks harfiah \\n\ menjadi karakter baris baru (newline) yang sebenarnya
-    privateKey = privateKey.replace(/^['"']|['"']$/g, '').replace(/\\n/g, '\n');
-
-    if (!privateKey.includes('BEGIN PRIVATE KEY')) {
-      throw new Error('Format Private Key salah. Pastikan kuncinya utuh.');
-    }
-
-    // ====================================================================
-    // 2. AUTENTIKASI GOOGLE
-    // ====================================================================
-    const auth = new google.auth.GoogleAuth({
-      credentials: {
-        type: 'service_account',
-        client_email: clientEmail,
-        private_key: privateKey,
-      },
-      scopes: [
-        'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive'
-      ],
-    });
-
-    const sheets = google.sheets({ version: 'v4', auth });
-    const drive = google.drive({ version: 'v3', auth });
+    const pinAdmin = process.env.ADMIN_PIN || process.env.VITE_ADMIN_PIN || '';
+    const sheetId = process.env.GOOGLE_SHEET_ID || process.env.VITE_GOOGLE_SHEET_ID || '';
+    const folderId = process.env.GOOGLE_FOLDER_ID || process.env.VITE_GOOGLE_FOLDER_ID || '';
+    const cleanEmail = clientEmail.replace(/^['"]|['"]$/g, '').trim();
+    const cleanPin = pinAdmin.replace(/^['"]|['"]$/g, '').trim();
+    const cleanSheetId = sheetId.replace(/^['"]|['"]$/g, '').trim();
+    const cleanFolderId = folderId.replace(/^['"]|['"]$/g, '').trim();
+    let cleanPrivateKey = privateKey.replace(/^['"]|['"]$/g, '');
+    cleanPrivateKey = cleanPrivateKey.replace(/\\n/g, '\n');
+    if (!cleanPrivateKey.includes('-----BEGIN PRIVATE KEY-----')) throw new Error('Format Private Key salah');
+    const jwtClient = new google.auth.JWT({ email: cleanEmail, key: cleanPrivateKey, keyType: 'PKCS8', scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'] });
+    await jwtClient.authorize();
+    const sheets = google.sheets({ version: 'v4', auth: jwtClient });
+    const drive = google.drive({ version: 'v3', auth: jwtClient });
     const RANGE = 'Sheet1!A:E';
-
-    // ====================================================================
-    // A. LOGIN ADMIN
-    // ====================================================================
-    if (action === 'cekLogin') {
-      const isMatch = String(payload.pin).trim() === pinAdmin;
-      if (isMatch) {
-        return res.status(200).json({ success: true });
-      } else {
-        return res.status(200).json({ success: false, message: 'PIN Salah' });
-      }
-    }
-
-    // ====================================================================
-    // B. SUBMIT FORM
-    // ====================================================================
+    if (action === 'cekLogin') return res.status(200).json({ success: String(payload.pin).trim() === cleanPin });
     if (action === 'submitForm') {
       let fileUrl = '';
-      
       if (payload.fileData) {
-        let mimeType = 'application/octet-stream';
-        let base64Data = payload.fileData;
-
-        if (payload.fileData.includes(',')) {
-          const parts = payload.fileData.split(',');
-          const match = parts[0].match(/:(.*?);/);
-          if (match) mimeType = match[1];
-          base64Data = parts[1];
-        }
-        
-        const buffer = Buffer.from(base64Data, 'base64');
-        const bufferStream = new PassThrough();
-        bufferStream.end(buffer);
-
-        const driveRes = await drive.files.create({
-          requestBody: { name: payload.fileName, parents: [folderId] },
-          media: { mimeType: mimeType, body: bufferStream },
-          fields: 'webViewLink' 
-        });
-        fileUrl = driveRes.data.webViewLink;
+        let mimeType = 'application/octet-stream', base64Data = payload.fileData;
+        if (payload.fileData.includes(',')) { const p = payload.fileData.split(','); const m = p[0].match(/:(.*?);/); if (m) mimeType = m[1]; base64Data = p[1]; }
+        const buf = Buffer.from(base64Data, 'base64'), stream = new PassThrough(); stream.end(buf);
+        const dr = await drive.files.create({ requestBody: { name: payload.fileName, parents: [cleanFolderId] }, media: { mimeType, body: stream }, fields: 'webViewLink' });
+        fileUrl = dr.data.webViewLink;
       }
-
-      const values = [
-        new Date().toISOString(),
-        payload.nama,
-        payload.email,
-        fileUrl,
-        'PENDING'
-      ];
-
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: sheetId,
-        range: RANGE,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [values] }
-      });
-
+      await sheets.spreadsheets.values.append({ spreadsheetId: cleanSheetId, range: RANGE, valueInputOption: 'USER_ENTERED', requestBody: { values: [[new Date().toISOString(), payload.nama, payload.email, fileUrl, 'PENDING']] } });
       return res.status(200).json({ success: true, message: 'Data berhasil disimpan' });
     }
-
-    // ====================================================================
-    // C. AMBIL DATA
-    // ====================================================================
-    if (action === 'getData') {
-      const response = await sheets.spreadsheets.values.get({
-        spreadsheetId: sheetId,
-        range: RANGE,
-      });
-      const rows = response.data.values || [];
-      const data = rows.length > 1 ? rows.slice(1) : []; 
-      return res.status(200).json({ success: true, data: data });
-    }
-
-    // ====================================================================
-    // D. UPDATE STATUS
-    // ====================================================================
-    if (action === 'updateStatus') {
-      const barisKe = payload.index + 2; 
-
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: sheetId,
-        range: `Sheet1!E${barisKe}`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [[payload.statusBaru]] }
-      });
-      
-      return res.status(200).json({ success: true });
-    }
-
+    if (action === 'getData') { const r = await sheets.spreadsheets.values.get({ spreadsheetId: cleanSheetId, range: RANGE }); return res.status(200).json({ success: true, data: (r.data.values||[]).slice(1) }); }
+    if (action === 'updateStatus') { await sheets.spreadsheets.values.update({ spreadsheetId: cleanSheetId, range: 'Sheet1!E'+(payload.index+2), valueInputOption: 'USER_ENTERED', requestBody: { values: [[payload.statusBaru]] } }); return res.status(200).json({ success: true }); }
     return res.status(400).json({ success: false, message: 'Aksi tidak ditemukan' });
-
-  } catch (error) {
-    console.error('API Error:', error);
-    return res.status(500).json({ success: false, message: error.message });
-  }
+  } catch (error) { console.error('API Error:', error); return res.status(500).json({ success: false, message: error.message }); }
 }
-
-
-
