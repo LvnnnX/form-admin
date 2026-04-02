@@ -1,7 +1,7 @@
 import { google } from 'googleapis';
 import { PassThrough } from 'stream';
 
-// ⚠️ WAJIB DITAMBAHKAN: Mengubah batas limit data Vercel dari 1MB menjadi 10MB
+// Menaikkan batas ukuran file di Vercel menjadi 10MB
 export const config = {
   api: {
     bodyParser: {
@@ -18,35 +18,46 @@ export default async function handler(req, res) {
   try {
     const { action, payload } = req.body;
 
-    // ⚠️ PERBAIKAN: Membaca Private Key dengan aman (menghapus tanda kutip ekstra jika ada dari .env)
-    const privateKey = process.env.VITE_GOOGLE_PRIVATE_KEY
-      ? process.env.VITE_GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n').replace(/^"|"$/g, '')
-      : '';
+    // 1. PEMBERSIHAN ENVIRONMENT VARIABLES (SUPER KETAT)
+    // Ini akan menghapus tanda kutip (") dan spasi yang sering bikin error di Vercel
+    const clientEmail = (process.env.VITE_GOOGLE_CLIENT_EMAIL || '').replace(/"/g, '').trim();
+    const privateKey = (process.env.VITE_GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n').replace(/"/g, '').trim();
+    const pinAdmin = (process.env.VITE_PIN_ADMIN || '').replace(/"/g, '').trim();
+    const sheetId = (process.env.VITE_GOOGLE_SHEET_ID || '').replace(/"/g, '').trim();
+    const folderId = (process.env.VITE_GOOGLE_FOLDER_ID || '').replace(/"/g, '').trim();
 
-    // Autentikasi Service Account ke Google Cloud
-    const auth = new google.auth.JWT(
-      process.env.VITE_GOOGLE_CLIENT_EMAIL,
-      null,
-      privateKey,
-      ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-    );
+    // 2. AUTENTIKASI MENGGUNAKAN GoogleAuth (Jauh lebih stabil dari JWT)
+    const auth = new google.auth.GoogleAuth({
+      credentials: {
+        client_email: clientEmail,
+        private_key: privateKey,
+      },
+      scopes: [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+      ],
+    });
 
     const sheets = google.sheets({ version: 'v4', auth });
     const drive = google.drive({ version: 'v3', auth });
-    
-    const SHEET_ID = process.env.VITE_GOOGLE_SHEET_ID;
-    const FOLDER_ID = process.env.VITE_GOOGLE_FOLDER_ID;
-    const RANGE = 'Sheet1!A:E'; // Pastikan nama tab Spreadsheet Anda benar-benar "Sheet1"
+    const RANGE = 'Sheet1!A:E'; // Pastikan nama sheet di bawah Google Spreadsheet Anda adalah "Sheet1"
 
     // ---------------------------------------------------------
-    // 1. LOGIKA SUBMIT FORM (Upload Drive & Simpan ke Sheet)
+    // A. LOGIKA LOGIN ADMIN (PIN)
+    // ---------------------------------------------------------
+    if (action === 'cekLogin') {
+      // Membandingkan PIN input dengan PIN di env dengan aman
+      const isMatch = String(payload.pin).trim() === pinAdmin;
+      return res.status(200).json({ success: isMatch });
+    }
+
+    // ---------------------------------------------------------
+    // B. LOGIKA SUBMIT FORM (Upload Drive & Simpan ke Sheet)
     // ---------------------------------------------------------
     if (action === 'submitForm') {
       let fileUrl = '';
       
-      // Upload ke Google Drive
       if (payload.fileData) {
-        // Logika ekstraksi Base64 yang lebih aman (tahan error)
         let mimeType = 'application/octet-stream';
         let base64Data = payload.fileData;
 
@@ -61,8 +72,9 @@ export default async function handler(req, res) {
         const bufferStream = new PassThrough();
         bufferStream.end(buffer);
 
+        // Upload file ke Drive
         const driveRes = await drive.files.create({
-          requestBody: { name: payload.fileName, parents: [FOLDER_ID] },
+          requestBody: { name: payload.fileName, parents: [folderId] },
           media: { mimeType: mimeType, body: bufferStream },
           fields: 'webViewLink' 
         });
@@ -78,9 +90,9 @@ export default async function handler(req, res) {
         'PENDING'
       ];
 
-      // Simpan ke Spreadsheet
+      // Tulis baris baru ke Spreadsheet
       await sheets.spreadsheets.values.append({
-        spreadsheetId: SHEET_ID,
+        spreadsheetId: sheetId,
         range: RANGE,
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [values] }
@@ -90,47 +102,37 @@ export default async function handler(req, res) {
     }
 
     // ---------------------------------------------------------
-    // 2. LOGIKA AMBIL DATA (Untuk Halaman Admin)
+    // C. LOGIKA AMBIL DATA (Untuk Admin)
     // ---------------------------------------------------------
     if (action === 'getData') {
       const response = await sheets.spreadsheets.values.get({
-        spreadsheetId: SHEET_ID,
+        spreadsheetId: sheetId,
         range: RANGE,
       });
       const rows = response.data.values || [];
-      const data = rows.length > 1 ? rows.slice(1) : [];
+      const data = rows.length > 1 ? rows.slice(1) : []; // Hapus header
       return res.status(200).json({ success: true, data: data });
     }
 
     // ---------------------------------------------------------
-    // 3. LOGIKA UPDATE STATUS (Untuk Halaman Admin)
+    // D. LOGIKA UPDATE STATUS (Untuk Admin)
     // ---------------------------------------------------------
     if (action === 'updateStatus') {
-      const { index, statusBaru } = payload;
-      const barisKe = index + 2; 
+      const barisKe = payload.index + 2; 
 
       await sheets.spreadsheets.values.update({
-        spreadsheetId: SHEET_ID,
-        range: `Sheet1!E${barisKe}`, 
+        spreadsheetId: sheetId,
+        range: `Sheet1!E${barisKe}`, // E adalah kolom status
         valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [[statusBaru]] }
+        requestBody: { values: [[payload.statusBaru]] }
       });
       
       return res.status(200).json({ success: true });
     }
 
-    // ---------------------------------------------------------
-    // 4. LOGIKA LOGIN ADMIN
-    // ---------------------------------------------------------
-    if (action === 'cekLogin') {
-      const isValid = payload.pin === process.env.VITE_PIN_ADMIN;
-      return res.status(200).json({ success: isValid });
-    }
-
     return res.status(400).json({ success: false, message: 'Aksi tidak ditemukan' });
 
   } catch (error) {
-    // Memberikan pesan error yang jelas ke frontend agar mudah di-debug
     console.error('API Error:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
