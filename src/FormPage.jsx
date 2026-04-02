@@ -1,20 +1,91 @@
 import { useState, useContext } from 'react'
 import { AppContext } from './App'
 
-const API = {
-  async submitData(formData) {
-    const existing = JSON.parse(localStorage.getItem('ktp_data') || '[]')
-    const newEntry = [
-      new Date().toLocaleString('id-ID'),
+const CONFIG = {
+  sheetId: import.meta.env.VITE_GOOGLE_SHEET_ID || '1H1uw245vdylR6Zuesz9WZeZJJWe0ego9p19x8KHAfws',
+  credentials: null
+}
+
+if (import.meta.env.VITE_GOOGLE_CREDENTIALS) {
+  try {
+    CONFIG.credentials = JSON.parse(import.meta.env.VITE_GOOGLE_CREDENTIALS)
+  } catch (e) {
+    console.error('Invalid credentials')
+  }
+}
+
+const GoogleSheets = {
+  accessToken: null,
+  tokenExpiry: 0,
+
+  async getAccessToken() {
+    if (this.accessToken && Date.now() < this.tokenExpiry) return this.accessToken
+    if (!CONFIG.credentials) return null
+
+    const { client_email, private_key } = CONFIG.credentials
+    const now = Math.floor(Date.now() / 1000)
+    const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
+    const claim = btoa(JSON.stringify({
+      iss: client_email,
+      scope: 'https://www.googleapis.com/auth/spreadsheets',
+      aud: 'https://oauth2.googleapis.com/token',
+      exp: now + 3600,
+      iat: now
+    }))
+
+    try {
+      const pemLines = private_key.split('\\n')
+      const base64 = pemLines.filter(line => !line.startsWith('-----')).join('')
+      const binaryStr = atob(base64)
+      const bytes = new Uint8Array(binaryStr.length)
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i)
+
+      const key = await crypto.subtle.importKey('pkcs8', bytes.buffer, { name: 'RSASSA-PKCS1-V1_5', hash: 'SHA-256' }, false, ['sign'])
+      const signature = await crypto.subtle.sign('RSASSA-PKCS1-V1_5', key, new TextEncoder().encode(header + '.' + claim))
+      const sigBase64 = btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '')
+      const jwt = header + '.' + claim + '.' + sigBase64
+
+      const resp = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=urn%3Aietf%3Aparams%3Aoauth2%3Agrant-type%3Ajwt-bearer&assertion=' + jwt
+      })
+      const data = await resp.json()
+      if (data.access_token) {
+        this.accessToken = data.access_token
+        this.tokenExpiry = Date.now() + (data.expires_in * 1000) - 60000
+        return this.accessToken
+      }
+    } catch (err) { console.error('Auth error:', err) }
+    return null
+  },
+
+  async appendRow(formData) {
+    const token = await this.getAccessToken()
+    if (!token) return false
+
+    const values = [
+      new Date().toISOString(),
+      'KTP-' + Date.now().toString(36).toUpperCase(),
       formData.nama,
       formData.email,
       formData.fileName || '',
+      formData.fileData || '',
       '',
-      formData.fileData || ''
+      '',
+      '',
+      '',
+      ''
     ]
-    existing.unshift(newEntry)
-    localStorage.setItem('ktp_data', JSON.stringify(existing))
-    return { success: true }
+
+    try {
+      await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + CONFIG.sheetId + '/values/A:A:append?valueInputOption=RAW', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: [values] })
+      })
+      return true
+    } catch (err) { console.error('Append error:', err); return false }
   }
 }
 
@@ -53,15 +124,17 @@ export default function FormPage() {
     e.preventDefault()
     if (!file) { alert('Dokumen Wajib - Silakan upload KTP'); return }
     setLoading(true)
+
     const reader = new FileReader()
     reader.onload = async (event) => {
       const payload = { nama: form.nama, email: form.email, fileName: file.name, fileData: event.target.result }
-      const response = await API.submitData(payload)
-      if (response.success) { 
-        alert('Berhasil Dikirim! Data Anda telah tersimpan.') 
+      const success = await GoogleSheets.appendRow(payload)
+      
+      if (success) { 
+        alert('Berhasil Dikirim! Data Anda telah tersimpan di Google Spreadsheet.') 
         e.target.reset(); setForm({ nama: '', email: '' }); removeFile(); createConfetti() 
       } else {
-        alert('Gagal: ' + (response.message || 'Unknown error'))
+        alert('Gagal mengirim ke Google Spreadsheet. Pastikan konfigurasi sudah benar.')
       }
       setLoading(false)
     }
