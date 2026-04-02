@@ -117,6 +117,8 @@ Copy the output - that's your `VITE_GOOGLE_CREDENTIALS`
    git push -u origin main
    ```
 
+   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
+
 2. **Connect to Vercel:**
    - Go to [vercel.com](https://vercel.com)
    - Click "Add New" → "Project"
