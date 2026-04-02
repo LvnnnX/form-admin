@@ -16,26 +16,40 @@ export default async function handler(req, res) {
     const { action, payload } = req.body;
 
     // ====================================================================
-    // 1. PEMBERSIH ENVIRONMENT VARIABLES (JURUS ANTI-ERROR VERCEL)
+    // 1. ENVIRONMENT VARIABLES (SERVER-SIDE, NO VITE_ PREFIX!)
     // ====================================================================
-    let clientEmail = process.env.VITE_GOOGLE_CLIENT_EMAIL || '';
-    let privateKey = process.env.VITE_GOOGLE_PRIVATE_KEY || '';
-    let pinAdmin = process.env.VITE_ADMIN_PIN || '';
-    let sheetId = process.env.VITE_GOOGLE_SHEET_ID || '';
-    let folderId = process.env.VITE_GOOGLE_FOLDER_ID || '';
+    // NOTE: VITE_ prefix = client-side only. Server routes use plain env vars.
+    
+    // Try full credentials JSON first, then individual vars
+    let credentials = null;
+    const credsJson = process.env.GOOGLE_CREDENTIALS || process.env.VITE_GOOGLE_CREDENTIALS;
+    if (credsJson) {
+      try {
+        credentials = JSON.parse(credsJson.replace(/\\n/g, '\n'));
+      } catch (e) {
+        // Try as individual vars
+      }
+    }
+    
+    // Fall back to individual env vars
+    let clientEmail = credentials?.client_email || process.env.GOOGLE_CLIENT_EMAIL || process.env.VITE_GOOGLE_CLIENT_EMAIL || '';
+    let privateKey = credentials?.private_key || process.env.GOOGLE_PRIVATE_KEY || process.env.VITE_GOOGLE_PRIVATE_KEY || '';
+    let pinAdmin = process.env.ADMIN_PIN || process.env.VITE_ADMIN_PIN || '';
+    let sheetId = process.env.GOOGLE_SHEET_ID || process.env.VITE_GOOGLE_SHEET_ID || '';
+    let folderId = process.env.GOOGLE_FOLDER_ID || process.env.VITE_GOOGLE_FOLDER_ID || '';
 
-    // Menghapus tanda kutip tunggal/ganda di awal & akhir yang sering nyangkut
-    clientEmail = clientEmail.replace(/^['"]|['"]$/g, '').trim();
-    pinAdmin = pinAdmin.replace(/^['"]|['"]$/g, '').trim();
-    sheetId = sheetId.replace(/^['"]|['"]$/g, '').trim();
-    folderId = folderId.replace(/^['"]|['"]$/g, '').trim();
+    // Menghapus tanda kutip tunggal/ganda di awal & akhir yang sering nyantung
+    clientEmail = clientEmail.replace(/^['"']|['"']$/g, '').trim();
+    pinAdmin = pinAdmin.replace(/^['"']|['"']$/g, '').trim();
+    sheetId = sheetId.replace(/^['"']|['"']$/g, '').trim();
+    folderId = folderId.replace(/^['"']|['"']$/g, '').trim();
 
     // PERBAIKAN KRUSIAL UNTUK PRIVATE KEY (Invalid JWT Signature)
-    // Menghapus kutip, lalu mengubah teks harfiah "\n" menjadi karakter baris baru (newline) yang sebenarnya
-    privateKey = privateKey.replace(/^['"]|['"]$/g, '').replace(/\\n/g, '\n');
+    // Menghapus kutip, lalu mengubah teks harfiah \\n\ menjadi karakter baris baru (newline) yang sebenarnya
+    privateKey = privateKey.replace(/^['"']|['"']$/g, '').replace(/\\n/g, '\n');
 
     if (!privateKey.includes('BEGIN PRIVATE KEY')) {
-      throw new Error("Format Private Key salah. Pastikan kuncinya utuh.");
+      throw new Error('Format Private Key salah. Pastikan kuncinya utuh.');
     }
 
     // ====================================================================
@@ -43,6 +57,7 @@ export default async function handler(req, res) {
     // ====================================================================
     const auth = new google.auth.GoogleAuth({
       credentials: {
+        type: 'service_account',
         client_email: clientEmail,
         private_key: privateKey,
       },
@@ -64,7 +79,7 @@ export default async function handler(req, res) {
       if (isMatch) {
         return res.status(200).json({ success: true });
       } else {
-        return res.status(200).json({ success: false, message: "PIN Salah" });
+        return res.status(200).json({ success: false, message: 'PIN Salah' });
       }
     }
 
@@ -151,3 +166,6 @@ export default async function handler(req, res) {
     return res.status(500).json({ success: false, message: error.message });
   }
 }
+
+
+
