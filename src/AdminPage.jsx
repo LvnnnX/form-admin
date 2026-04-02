@@ -1,110 +1,5 @@
-import { useState, useContext, useCallback } from 'react'
+import { useState, useContext, useEffect, useCallback } from 'react'
 import { AppContext } from './App'
-
-const ADMIN_PIN = '123456'
-const CONFIG = {
-  sheetId: import.meta.env.VITE_GOOGLE_SHEET_ID || '1H1uw245vdylR6Zuesz9WZeZJJWe0ego9p19x8KHAfws',
-  credentials: null
-}
-
-if (import.meta.env.VITE_GOOGLE_CREDENTIALS) {
-  try {
-    CONFIG.credentials = JSON.parse(import.meta.env.VITE_GOOGLE_CREDENTIALS)
-  } catch (e) {
-    console.error('Invalid credentials')
-  }
-}
-
-const GoogleSheets = {
-  accessToken: null,
-  tokenExpiry: 0,
-
-  async getAccessToken() {
-    if (this.accessToken && Date.now() < this.tokenExpiry) return this.accessToken
-    if (!CONFIG.credentials) return null
-
-    const { client_email, private_key } = CONFIG.credentials
-    const now = Math.floor(Date.now() / 1000)
-    const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
-    const claim = btoa(JSON.stringify({
-      iss: client_email,
-      scope: 'https://www.googleapis.com/auth/spreadsheets',
-      aud: 'https://oauth2.googleapis.com/token',
-      exp: now + 3600,
-      iat: now
-    }))
-
-    try {
-      const pemLines = private_key.split('\\n')
-      const base64 = pemLines.filter(line => !line.startsWith('-----')).join('')
-      const binaryStr = atob(base64)
-      const bytes = new Uint8Array(binaryStr.length)
-      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i)
-
-      const key = await crypto.subtle.importKey('pkcs8', bytes.buffer, { name: 'RSASSA-PKCS1-V1_5', hash: 'SHA-256' }, false, ['sign'])
-      const signature = await crypto.subtle.sign('RSASSA-PKCS1-V1_5', key, new TextEncoder().encode(header + '.' + claim))
-      const sigBase64 = btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '')
-      const jwt = header + '.' + claim + '.' + sigBase64
-
-      const resp = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'grant_type=urn%3Aietf%3Aparams%3Aoauth2%3Agrant-type%3Ajwt-bearer&assertion=' + jwt
-      })
-      const data = await resp.json()
-      if (data.access_token) {
-        this.accessToken = data.access_token
-        this.tokenExpiry = Date.now() + (data.expires_in * 1000) - 60000
-        return this.access_token
-      }
-    } catch (err) { console.error('Auth error:', err) }
-    return null
-  },
-
-  async getData() {
-    const token = await this.getAccessToken()
-    if (!token) return []
-    try {
-      const resp = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + CONFIG.sheetId + '/values/A1:K1000', {
-        headers: { Authorization: 'Bearer ' + token }
-      })
-      const data = await resp.json()
-      return data.values || []
-    } catch (err) { return [] }
-  },
-
-  async updateCell(rowIndex, col, value) {
-    const token = await this.getAccessToken()
-    if (!token) return false
-    const colMap = { H: 8, J: 10, K: 11 }
-    const cell = String.fromCharCode(64 + colMap[col]) + rowIndex
-    try {
-      await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + CONFIG.sheetId + '/values/' + cell + '?valueInputOption=RAW', {
-        method: 'PUT',
-        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: [[value]] })
-      })
-      return true
-    } catch (err) { return false }
-  }
-}
-
-const API = {
-  async login(pin) {
-    if (pin === ADMIN_PIN) return { success: true }
-    return { success: false, message: 'PIN salah' }
-  },
-  async getData() {
-    const rows = await GoogleSheets.getData()
-    if (!rows || rows.length < 2) return { success: true, data: [] }
-    return { success: true, data: rows.slice(1) }
-  },
-  async updateStatus(index, statusBaru) {
-    await GoogleSheets.updateCell(index + 2, 'H', statusBaru)
-    await GoogleSheets.updateCell(index + 2, 'J', new Date().toISOString())
-    return { success: true }
-  }
-}
 
 export default function AdminPage() {
   const { navigate } = useContext(AppContext)
@@ -119,27 +14,62 @@ export default function AdminPage() {
 
   const handleLogin = async () => {
     setLoading(true)
-    const response = await API.login(pin)
-    if (response.success) {
-      localStorage.setItem('adminToken', 'true')
-      setIsLoggedIn(true)
-      loadData()
-    } else {
-      alert(response.message || 'PIN Salah')
+    try {
+      const resp = await fetch('/api/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cekLogin', payload: { pin } })
+      })
+      const result = await resp.json()
+      if (result.success) {
+        localStorage.setItem('adminToken', 'true')
+        setIsLoggedIn(true)
+        loadData()
+      } else {
+        alert('PIN Salah')
+      }
+    } catch (e) {
+      alert("Gagal menghubungi server.")
     }
     setLoading(false)
   }
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    const response = await API.getData()
-    if (response.success) { setData(response.data) }
+    try {
+      const resp = await fetch('/api/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'getData' })
+      })
+      const result = await resp.json()
+      if (result.success) { setData(result.data) }
+    } catch (err) {
+      console.error(err)
+    }
     setLoading(false)
   }, [])
 
+  useEffect(() => {
+    if (isLoggedIn) loadData()
+  }, [isLoggedIn, loadData])
+
   const handleVerifikasi = async (index, statusBaru) => {
-    await API.updateStatus(index, statusBaru)
-    loadData()
+    setLoading(true)
+    try {
+      const resp = await fetch('/api/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'updateStatus', payload: { index, statusBaru } })
+      })
+      const result = await resp.json()
+      if (result.success) {
+        loadData() // Muat ulang data untuk merefleksikan perubahan
+      }
+    } catch (err) {
+      alert("Gagal update status")
+    }
+    setLoading(false)
   }
 
   const getStatusClass = (status) => {
@@ -148,28 +78,23 @@ export default function AdminPage() {
     return 'pending'
   }
 
-  const getStatusLabel = (status) => {
-    if (status === 'DIVERIFIKASI') return 'Disetujui'
-    if (status === 'TERTOLAK') return 'Ditolak'
-    return 'Pending'
-  }
-
   const openModal = (entry, idx) => { setSelected({ ...entry, index: idx }); setModalActive(true) }
   const closeModal = () => { setModalActive(false); setTimeout(() => setSelected(null), 300) }
 
+  // [0]=Waktu, [1]=Nama, [2]=Email, [3]=Link KTP, [4]=Status
   const filteredData = data.filter(row => {
-    const status = row[7] || ''
-    if (filter === 'PENDING' && status !== 'Pending' && status !== '') return false
-    if (filter === 'DIVERIFIKASI' && status !== 'Verified') return false
-    if (filter === 'TERTOLAK' && status !== 'Rejected') return false
+    const status = row[4] || 'PENDING'
+    if (filter === 'PENDING' && status !== 'PENDING') return false
+    if (filter === 'DIVERIFIKASI' && status !== 'DIVERIFIKASI') return false
+    if (filter === 'TERTOLAK' && status !== 'TERTOLAK') return false
     if (search) {
       const searchLower = search.toLowerCase()
-      return (row[2] || '').toLowerCase().includes(searchLower) || (row[3] || '').toLowerCase().includes(searchLower)
+      return (row[1] || '').toLowerCase().includes(searchLower) || (row[2] || '').toLowerCase().includes(searchLower)
     }
     return true
   })
 
-  const pendingCount = data.filter(row => { const s = row[7] || ''; return s !== 'Verified' && s !== 'Rejected' }).length
+  const pendingCount = data.filter(row => (row[4] || 'PENDING') === 'PENDING').length
 
   if (!isLoggedIn) {
     return (
@@ -186,6 +111,7 @@ export default function AdminPage() {
           <button className='btn-login' onClick={handleLogin} disabled={loading || pin.length < 4}>
             {loading ? 'Memeriksa...' : 'Masuk ke Dashboard'}
           </button>
+          <button onClick={() => navigate('form')} style={{marginTop: '20px', width:'100%', background:'transparent', border:'none', color:'var(--gray-500)', cursor:'pointer'}}>⬅ Kembali ke Form</button>
         </div>
       </div>
     )
@@ -202,7 +128,7 @@ export default function AdminPage() {
           <button className={'nav-btn ' + (filter === 'TERTOLAK' ? 'active' : '')} onClick={() => setFilter('TERTOLAK')}><span className='material-icons-round'>cancel</span> Ditolak</button>
         </nav>
         <div style={{ padding: '16px' }}>
-          <button className='btn-logout' onClick={() => { localStorage.removeItem('adminToken'); navigate('form') }}><span className='material-icons-round'>logout</span> Logout</button>
+          <button className='btn-logout' onClick={() => { localStorage.removeItem('adminToken'); setIsLoggedIn(false); navigate('form') }}><span className='material-icons-round'>logout</span> Logout</button>
         </div>
       </aside>
       <main className='main-content'>
@@ -213,14 +139,14 @@ export default function AdminPage() {
               <span className='material-icons-round' style={{ color: 'var(--gray-400)' }}>search</span>
               <input type='text' placeholder='Cari nama atau email...' value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            <button className='btn-refresh' onClick={loadData}><span className='material-icons-round'>refresh</span></button>
+            <button className='btn-refresh' onClick={loadData} disabled={loading}><span className='material-icons-round'>refresh</span></button>
           </div>
         </header>
         <div className='stats-grid'>
           <div className='stat-card' onClick={() => setFilter('ALL')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#6366f1,#818cf8)' }}><span className='material-icons-round'>people</span></div><div className='stat-info'><span className='stat-value'>{data.length}</span><span className='stat-label'>Total Masuk</span></div></div>
           <div className='stat-card' onClick={() => setFilter('PENDING')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#f59e0b,#fbbf24)' }}><span className='material-icons-round'>schedule</span></div><div className='stat-info'><span className='stat-value'>{pendingCount}</span><span className='stat-label'>Antrean</span></div></div>
-          <div className='stat-card' onClick={() => setFilter('DIVERIFIKASI')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#10b981,#34d399)' }}><span className='material-icons-round'>verified</span></div><div className='stat-info'><span className='stat-value'>{data.filter(r => (r[7] || '') === 'Verified').length}</span><span className='stat-label'>Disetujui</span></div></div>
-          <div className='stat-card' onClick={() => setFilter('TERTOLAK')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#ef4444,#f87171)' }}><span className='material-icons-round'>cancel</span></div><div className='stat-info'><span className='stat-value'>{data.filter(r => (r[7] || '') === 'Rejected').length}</span><span className='stat-label'>Ditolak</span></div></div>
+          <div className='stat-card' onClick={() => setFilter('DIVERIFIKASI')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#10b981,#34d399)' }}><span className='material-icons-round'>verified</span></div><div className='stat-info'><span className='stat-value'>{data.filter(r => r[4] === 'DIVERIFIKASI').length}</span><span className='stat-label'>Disetujui</span></div></div>
+          <div className='stat-card' onClick={() => setFilter('TERTOLAK')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#ef4444,#f87171)' }}><span className='material-icons-round'>cancel</span></div><div className='stat-info'><span className='stat-value'>{data.filter(r => r[4] === 'TERTOLAK').length}</span><span className='stat-label'>Ditolak</span></div></div>
         </div>
         <div className='table-container'>
           <table className='data-table'>
@@ -230,10 +156,10 @@ export default function AdminPage() {
                 const actualIdx = data.indexOf(row)
                 return (
                   <tr key={idx} onClick={() => openModal(row, actualIdx)}>
-                    <td><div className='name-cell'><div className='avatar'>{(row[2] || '?').charAt(0).toUpperCase()}</div>{row[2] || '-'}</div></td>
-                    <td>{row[3] || '-'}</td>
+                    <td><div className='name-cell'><div className='avatar'>{(row[1] || '?').charAt(0).toUpperCase()}</div>{row[1] || '-'}</div></td>
+                    <td>{row[2] || '-'}</td>
                     <td>{row[0] ? new Date(row[0]).toLocaleDateString('id-ID') : '-'}</td>
-                    <td><span className={'status-badge ' + getStatusClass(row[7])}>{getStatusLabel(row[7])}</span></td>
+                    <td><span className={'status-badge ' + getStatusClass(row[4])}>{row[4] || 'PENDING'}</span></td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <button className='action-btn' onClick={() => openModal(row, actualIdx)}><span className='material-icons-round'>visibility</span></button>
                     </td>
@@ -251,25 +177,30 @@ export default function AdminPage() {
               <div className='modal-header'><h2>Detail Responden</h2><button className='btn-close' onClick={closeModal}><span className='material-icons-round'>close</span></button></div>
               <div className='modal-body'>
                 <div className='detail-grid'>
-                  <div className='detail-item'><span className='detail-label'>Nama Lengkap</span><span className='detail-value'>{selected[2]}</span></div>
-                  <div className='detail-item'><span className='detail-label'>Alamat Email</span><span className='detail-value'>{selected[3]}</span></div>
+                  <div className='detail-item'><span className='detail-label'>Nama Lengkap</span><span className='detail-value'>{selected[1]}</span></div>
+                  <div className='detail-item'><span className='detail-label'>Alamat Email</span><span className='detail-value'>{selected[2]}</span></div>
                   <div className='detail-item'><span className='detail-label'>Waktu Pendaftaran</span><span className='detail-value'>{selected[0] ? new Date(selected[0]).toLocaleString('id-ID') : '-'}</span></div>
-                  <div className='detail-item'><span className='detail-label'>Status Verifikasi</span><span className={'status-badge ' + getStatusClass(selected[7])}>{getStatusLabel(selected[7])}</span></div>
-                  {selected[5] && (
+                  <div className='detail-item'><span className='detail-label'>Status Verifikasi</span><span className={'status-badge ' + getStatusClass(selected[4])}>{selected[4] || 'PENDING'}</span></div>
+                  {selected[3] && (
                     <div className='detail-item full' style={{ marginTop: '15px' }}>
                       <span className='detail-label'>Dokumen KTP</span>
                       <div style={{ background: 'var(--gray-50)', padding: '15px', borderRadius: '12px', border: '1px solid var(--gray-200)', textAlign: 'center', marginTop: '8px' }}>
-                        <a href={selected[5]} target='_blank' rel='noreferrer' className='open-file-btn' style={{ marginTop: '12px' }}><span className='material-icons-round' style={{ fontSize: '18px' }}>open_in_new</span> Buka File Penuh</a>
+                        {selected[3].match(/\/d\/([a-zA-Z0-9-_]+)/) && (
+                          <div className='file-preview-container'>
+                            <iframe src={'https://drive.google.com/file/d/' + selected[3].match(/\/d\/([a-zA-Z0-9-_]+)/)[1] + '/preview'} title='KTP Preview' style={{width:'100%', height:'250px', border:'none', borderRadius:'8px'}} />
+                          </div>
+                        )}
+                        <a href={selected[3]} target='_blank' rel='noreferrer' className='open-file-btn' style={{ marginTop: '12px', display:'inline-flex', alignItems:'center', gap:'8px', textDecoration:'none', color:'var(--primary)', fontWeight:'bold', border:'1px solid var(--gray-200)', padding:'8px 16px', borderRadius:'8px' }}><span className='material-icons-round' style={{ fontSize: '18px' }}>open_in_new</span> Buka File Penuh</a>
                       </div>
                     </div>
                   )}
                 </div>
               </div>
               <div className='modal-footer'>
-                {(selected[7] || '') === 'Pending' || (selected[7] || '') === '' ? (
+                {(selected[4] || 'PENDING') === 'PENDING' ? (
                   <>
-                    <button className='btn-action reject' onClick={() => { handleVerifikasi(selected.index, 'Rejected'); closeModal() }}><span className='material-icons-round' style={{ fontSize: '18px' }}>close</span> Tolak Data</button>
-                    <button className='btn-action approve' onClick={() => { handleVerifikasi(selected.index, 'Verified'); closeModal() }}><span className='material-icons-round' style={{ fontSize: '18px' }}>check</span> Setujui Data</button>
+                    <button className='btn-action reject' onClick={() => { handleVerifikasi(selected.index, 'TERTOLAK'); closeModal() }}><span className='material-icons-round' style={{ fontSize: '18px' }}>close</span> Tolak Data</button>
+                    <button className='btn-action approve' onClick={() => { handleVerifikasi(selected.index, 'DIVERIFIKASI'); closeModal() }}><span className='material-icons-round' style={{ fontSize: '18px' }}>check</span> Setujui Data</button>
                   </>
                 ) : <div style={{ color: 'var(--gray-500)', fontSize: '14px', padding: '10px' }}>Data telah diproses.</div>}
               </div>
