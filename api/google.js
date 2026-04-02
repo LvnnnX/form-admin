@@ -1,12 +1,9 @@
 import { google } from 'googleapis';
 import { PassThrough } from 'stream';
 
-// Menaikkan batas ukuran file di Vercel menjadi 10MB
 export const config = {
   api: {
-    bodyParser: {
-      sizeLimit: '10mb',
-    },
+    bodyParser: { sizeLimit: '10mb' },
   },
 };
 
@@ -18,15 +15,32 @@ export default async function handler(req, res) {
   try {
     const { action, payload } = req.body;
 
-    // 1. PEMBERSIHAN ENVIRONMENT VARIABLES (SUPER KETAT)
-    // Ini akan menghapus tanda kutip (") dan spasi yang sering bikin error di Vercel
-    const clientEmail = (process.env.VITE_GOOGLE_CLIENT_EMAIL || '').replace(/"/g, '').trim();
-    const privateKey = (process.env.VITE_GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n').replace(/"/g, '').trim();
-    const pinAdmin = (process.env.VITE_ADMIN_PIN || '').replace(/"/g, '').trim();
-    const sheetId = (process.env.VITE_GOOGLE_SHEET_ID || '').replace(/"/g, '').trim();
-    const folderId = (process.env.VITE_GOOGLE_FOLDER_ID || '').replace(/"/g, '').trim();
+    // ====================================================================
+    // 1. PEMBERSIH ENVIRONMENT VARIABLES (JURUS ANTI-ERROR VERCEL)
+    // ====================================================================
+    let clientEmail = process.env.VITE_GOOGLE_CLIENT_EMAIL || '';
+    let privateKey = process.env.VITE_GOOGLE_PRIVATE_KEY || '';
+    let pinAdmin = process.env.VITE_ADMIN_PIN || '';
+    let sheetId = process.env.VITE_GOOGLE_SHEET_ID || '';
+    let folderId = process.env.VITE_GOOGLE_FOLDER_ID || '';
 
-    // 2. AUTENTIKASI MENGGUNAKAN GoogleAuth (Jauh lebih stabil dari JWT)
+    // Menghapus tanda kutip tunggal/ganda di awal & akhir yang sering nyangkut
+    clientEmail = clientEmail.replace(/^['"]|['"]$/g, '').trim();
+    pinAdmin = pinAdmin.replace(/^['"]|['"]$/g, '').trim();
+    sheetId = sheetId.replace(/^['"]|['"]$/g, '').trim();
+    folderId = folderId.replace(/^['"]|['"]$/g, '').trim();
+
+    // PERBAIKAN KRUSIAL UNTUK PRIVATE KEY (Invalid JWT Signature)
+    // Menghapus kutip, lalu mengubah teks harfiah "\n" menjadi karakter baris baru (newline) yang sebenarnya
+    privateKey = privateKey.replace(/^['"]|['"]$/g, '').replace(/\\n/g, '\n');
+
+    if (!privateKey.includes('BEGIN PRIVATE KEY')) {
+      throw new Error("Format Private Key salah. Pastikan kuncinya utuh.");
+    }
+
+    // ====================================================================
+    // 2. AUTENTIKASI GOOGLE
+    // ====================================================================
     const auth = new google.auth.GoogleAuth({
       credentials: {
         client_email: clientEmail,
@@ -40,20 +54,23 @@ export default async function handler(req, res) {
 
     const sheets = google.sheets({ version: 'v4', auth });
     const drive = google.drive({ version: 'v3', auth });
-    const RANGE = 'Sheet1!A:E'; // Pastikan nama sheet di bawah Google Spreadsheet Anda adalah "Sheet1"
+    const RANGE = 'Sheet1!A:E';
 
-    // ---------------------------------------------------------
-    // A. LOGIKA LOGIN ADMIN (PIN)
-    // ---------------------------------------------------------
+    // ====================================================================
+    // A. LOGIN ADMIN
+    // ====================================================================
     if (action === 'cekLogin') {
-      // Membandingkan PIN input dengan PIN di env dengan aman
       const isMatch = String(payload.pin).trim() === pinAdmin;
-      return res.status(200).json({ success: isMatch });
+      if (isMatch) {
+        return res.status(200).json({ success: true });
+      } else {
+        return res.status(200).json({ success: false, message: "PIN Salah" });
+      }
     }
 
-    // ---------------------------------------------------------
-    // B. LOGIKA SUBMIT FORM (Upload Drive & Simpan ke Sheet)
-    // ---------------------------------------------------------
+    // ====================================================================
+    // B. SUBMIT FORM
+    // ====================================================================
     if (action === 'submitForm') {
       let fileUrl = '';
       
@@ -72,7 +89,6 @@ export default async function handler(req, res) {
         const bufferStream = new PassThrough();
         bufferStream.end(buffer);
 
-        // Upload file ke Drive
         const driveRes = await drive.files.create({
           requestBody: { name: payload.fileName, parents: [folderId] },
           media: { mimeType: mimeType, body: bufferStream },
@@ -81,7 +97,6 @@ export default async function handler(req, res) {
         fileUrl = driveRes.data.webViewLink;
       }
 
-      // Format Data: [Waktu, Nama, Email, Link KTP, Status]
       const values = [
         new Date().toISOString(),
         payload.nama,
@@ -90,7 +105,6 @@ export default async function handler(req, res) {
         'PENDING'
       ];
 
-      // Tulis baris baru ke Spreadsheet
       await sheets.spreadsheets.values.append({
         spreadsheetId: sheetId,
         range: RANGE,
@@ -101,28 +115,28 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, message: 'Data berhasil disimpan' });
     }
 
-    // ---------------------------------------------------------
-    // C. LOGIKA AMBIL DATA (Untuk Admin)
-    // ---------------------------------------------------------
+    // ====================================================================
+    // C. AMBIL DATA
+    // ====================================================================
     if (action === 'getData') {
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: sheetId,
         range: RANGE,
       });
       const rows = response.data.values || [];
-      const data = rows.length > 1 ? rows.slice(1) : []; // Hapus header
+      const data = rows.length > 1 ? rows.slice(1) : []; 
       return res.status(200).json({ success: true, data: data });
     }
 
-    // ---------------------------------------------------------
-    // D. LOGIKA UPDATE STATUS (Untuk Admin)
-    // ---------------------------------------------------------
+    // ====================================================================
+    // D. UPDATE STATUS
+    // ====================================================================
     if (action === 'updateStatus') {
       const barisKe = payload.index + 2; 
 
       await sheets.spreadsheets.values.update({
         spreadsheetId: sheetId,
-        range: `Sheet1!E${barisKe}`, // E adalah kolom status
+        range: `Sheet1!E${barisKe}`,
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [[payload.statusBaru]] }
       });
