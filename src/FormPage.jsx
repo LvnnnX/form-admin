@@ -2,12 +2,19 @@ import { useState, useContext } from 'react'
 import { AppContext } from './App'
 
 const API = {
-  async submitKTP(data) {
-    const formData = { action: 'simpanData', nama: data.nama, email: data.email, fileName: data.fileName, fileData: data.fileData }
-    try {
-      const res = await fetch(import.meta.env.VITE_GAS_URL || '', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(formData) })
-      return await res.json()
-    } catch (error) { return { success: false, message: 'Gagal koneksi ke server.' } }
+  async submitData(formData) {
+    const existing = JSON.parse(localStorage.getItem('ktp_data') || '[]')
+    const newEntry = [
+      new Date().toLocaleString('id-ID'),
+      formData.nama,
+      formData.email,
+      formData.fileName || '',
+      '',
+      formData.fileData || ''
+    ]
+    existing.unshift(newEntry)
+    localStorage.setItem('ktp_data', JSON.stringify(existing))
+    return { success: true }
   }
 }
 
@@ -49,9 +56,13 @@ export default function FormPage() {
     const reader = new FileReader()
     reader.onload = async (event) => {
       const payload = { nama: form.nama, email: form.email, fileName: file.name, fileData: event.target.result }
-      const response = await API.submitKTP(payload)
-      if (response.success) { alert('Berhasil Dikirim! Data Anda telah tersimpan.'); e.target.reset(); setForm({ nama: '', email: '' }); removeFile(); createConfetti() }
-      else { alert('Gagal: ' + (response.message || 'Unknown error')) }
+      const response = await API.submitData(payload)
+      if (response.success) { 
+        alert('Berhasil Dikirim! Data Anda telah tersimpan.') 
+        e.target.reset(); setForm({ nama: '', email: '' }); removeFile(); createConfetti() 
+      } else {
+        alert('Gagal: ' + (response.message || 'Unknown error'))
+      }
       setLoading(false)
     }
     reader.readAsDataURL(file)

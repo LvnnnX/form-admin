@@ -1,27 +1,43 @@
 import { useState, useContext, useCallback } from 'react'
 import { AppContext } from './App'
 
+const ADMIN_PIN = '123456'
+
 const API = {
   async login(pin) {
-    const formData = { action: 'cekLogin', pin: pin }
-    try {
-      const res = await fetch(import.meta.env.VITE_GAS_URL || '', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(formData) })
-      return await res.json()
-    } catch (error) { return { success: false } }
+    if (pin === ADMIN_PIN) {
+      return { success: true }
+    }
+    return { success: false, message: 'PIN salah' }
   },
   async getData() {
-    const formData = { action: 'ambilData' }
-    try {
-      const res = await fetch(import.meta.env.VITE_GAS_URL || '', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(formData) })
-      return await res.json()
-    } catch (error) { return { success: false, data: [] } }
+    const storedData = localStorage.getItem('ktp_data')
+    if (storedData) {
+      return { success: true, data: JSON.parse(storedData) }
+    }
+    return { success: true, data: [] }
   },
-  async updateStatus(baris, statusBaru) {
-    const formData = { action: 'updateStatus', baris: baris, statusBaru: statusBaru }
-    try {
-      const res = await fetch(import.meta.env.VITE_GAS_URL || '', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(formData) })
-      return await res.json()
-    } catch (error) { return { success: false } }
+  async submitData(formData) {
+    const existing = JSON.parse(localStorage.getItem('ktp_data') || '[]')
+    const newEntry = [
+      new Date().toLocaleString('id-ID'),
+      formData.nama,
+      formData.email,
+      formData.fileName || '',
+      '',
+      formData.fileData || ''
+    ]
+    existing.unshift(newEntry)
+    localStorage.setItem('ktp_data', JSON.stringify(existing))
+    return { success: true }
+  },
+  async updateStatus(index, statusBaru) {
+    const storedData = JSON.parse(localStorage.getItem('ktp_data') || '[]')
+    if (storedData[index]) {
+      storedData[index][4] = statusBaru
+      localStorage.setItem('ktp_data', JSON.stringify(storedData))
+    }
+    return { success: true }
   }
 }
 
@@ -44,7 +60,7 @@ export default function AdminPage() {
       setIsLoggedIn(true)
       loadData()
     } else {
-      alert('PIN Salah')
+      alert(response.message || 'PIN Salah')
     }
     setLoading(false)
   }
@@ -57,8 +73,7 @@ export default function AdminPage() {
   }, [])
 
   const handleVerifikasi = async (index, statusBaru) => {
-    const barisSheet = index + 2
-    await API.updateStatus(barisSheet, statusBaru)
+    await API.updateStatus(index, statusBaru)
     const newData = [...data]
     newData[index][4] = statusBaru
     setData(newData)
@@ -104,7 +119,7 @@ export default function AdminPage() {
             <p>Masukkan PIN untuk mengakses data responden</p>
           </div>
           <div className='form-group'>
-            <input type='password' className='form-input' placeholder='Masukkan PIN' value={pin} onChange={(e) => setPin(e.target.value)} style={{ textAlign: 'center', letterSpacing: '5px', fontSize: '20px' }} />
+            <input type='password' className='form-input' placeholder='Masukkan PIN' value={pin} onChange={(e) => setPin(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleLogin()} style={{ textAlign: 'center', letterSpacing: '5px', fontSize: '20px' }} />
           </div>
           <button className='btn-login' onClick={handleLogin} disabled={loading || pin.length < 4}>
             {loading ? 'Memeriksa...' : 'Masuk ke Dashboard'}
