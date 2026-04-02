@@ -791,6 +791,7 @@ function DashboardPage() {
                         {entry.nama?.charAt(0).toUpperCase()}
                       </div>
                       <span className="font-medium">{entry.nama}</span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-gray-600">{entry.email}</td>
                   <td className="px-6 py-4 font-mono text-sm">{entry.ktp_number}</td>
