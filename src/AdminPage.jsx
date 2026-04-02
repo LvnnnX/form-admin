@@ -31,7 +31,7 @@ export default function AdminPage() {
     setLoading(true)
     try {
       const { data: responden, error } = await supabase
-        .from('responden')
+        .from('ktp_data')
         .select('*')
         .order('created_at', { ascending: false }) 
 
@@ -57,7 +57,7 @@ export default function AdminPage() {
       }
 
       const { error } = await supabase
-        .from('responden')
+        .from('ktp_data')
         .update(updatePayload)
         .eq('id', id)
 
@@ -75,7 +75,7 @@ export default function AdminPage() {
     if(confirm("Yakin ingin menghapus data ini secara permanen?")) {
       setLoading(true)
       try {
-        const { error } = await supabase.from('responden').delete().eq('id', id)
+        const { error } = await supabase.from('ktp_data').delete().eq('id', id)
         if(error) throw error
         setData(prevData => prevData.filter(item => item.id !== id))
         closeModal()

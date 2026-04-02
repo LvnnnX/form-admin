@@ -70,7 +70,7 @@ export default function FormPage() {
 
       // 3. Simpan Data ke Database sesuai Schema Baru
       const { error: dbError } = await supabase
-        .from('responden')
+        .from('ktp_data')
         .insert([
           { 
             nama: form.nama, 
