@@ -1,5 +1,6 @@
 import { useState, useContext, useCallback, useEffect } from 'react'
 import { AppContext } from './App'
+import { supabase } from './supabase'
 
 export default function AdminPage() {
   const { navigate } = useContext(AppContext)
@@ -14,24 +15,14 @@ export default function AdminPage() {
 
   const handleLogin = async () => {
     setLoading(true)
-    try {
-      // --- PERUBAHAN UTAMA: Memanggil API Vercel lokal untuk verifikasi PIN ---
-      const resp = await fetch('/api/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'cekLogin', payload: { pin } })
-      })
-      const result = await resp.json()
-      
-      if (result.success) {
-        localStorage.setItem('adminToken', 'true')
-        setIsLoggedIn(true)
-        loadData()
-      } else {
-        alert(result.message || 'PIN Salah')
-      }
-    } catch (e) {
-      alert('Gagal menghubungi server untuk Login.')
+    const validPin = import.meta.env.VITE_PIN_ADMIN || '123456'
+    
+    if (pin === validPin) {
+      localStorage.setItem('adminToken', 'true')
+      setIsLoggedIn(true)
+      loadData()
+    } else {
+      alert('PIN Salah!')
     }
     setLoading(false)
   }
@@ -39,13 +30,13 @@ export default function AdminPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const resp = await fetch('/api/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getData' })
-      })
-      const result = await resp.json()
-      if (result.success) { setData(result.data) }
+      const { data: responden, error } = await supabase
+        .from('responden')
+        .select('*')
+        .order('created_at', { ascending: false }) 
+
+      if (error) throw error
+      setData(responden || [])
     } catch (err) {
       console.error('Gagal load data:', err)
     }
@@ -56,49 +47,69 @@ export default function AdminPage() {
     if (isLoggedIn) loadData()
   }, [isLoggedIn, loadData])
 
-  const handleVerifikasi = async (index, statusBaru) => {
+  const handleVerifikasi = async (id, statusBaru) => {
     setLoading(true)
     try {
-      const resp = await fetch('/api/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'updateStatus', payload: { index, statusBaru } })
-      })
-      const result = await resp.json()
-      if (result.success) {
-        loadData()
-      } else {
-        alert("Gagal update status: " + result.message)
+      const updatePayload = {
+        status: statusBaru,
+        processed_by: 'Admin Vercel', // Bisa diganti sesuai user yang login
+        processed_at: new Date().toISOString()
       }
+
+      const { error } = await supabase
+        .from('responden')
+        .update(updatePayload)
+        .eq('id', id)
+
+      if (error) throw error
+      
+      setData(prevData => prevData.map(item => item.id === id ? { ...item, ...updatePayload } : item))
+      closeModal()
     } catch (e) {
-      alert("Error jaringan saat update status.")
+      alert("Gagal update status: " + e.message)
     }
     setLoading(false)
   }
 
+  const handleDelete = async (id) => {
+    if(confirm("Yakin ingin menghapus data ini secara permanen?")) {
+      setLoading(true)
+      try {
+        const { error } = await supabase.from('responden').delete().eq('id', id)
+        if(error) throw error
+        setData(prevData => prevData.filter(item => item.id !== id))
+        closeModal()
+      } catch (e) {
+        alert("Gagal menghapus data.")
+      }
+      setLoading(false)
+    }
+  }
+
   const getStatusClass = (status) => {
-    if (status === 'DIVERIFIKASI') return 'verified'
-    if (status === 'TERTOLAK') return 'rejected'
+    if (status === 'Verified') return 'verified'
+    if (status === 'Rejected') return 'rejected'
     return 'pending'
   }
 
-  const openModal = (entry, idx) => { setSelected({ ...entry, index: idx }); setModalActive(true) }
+  const openModal = (entry) => { setSelected(entry); setModalActive(true) }
   const closeModal = () => { setModalActive(false); setTimeout(() => setSelected(null), 300) }
 
-  // Mapping Kolom: [0]=Waktu, [1]=Nama, [2]=Email, [3]=Link, [4]=Status
   const filteredData = data.filter(row => {
-    const status = row[4] || 'PENDING'
-    if (filter === 'PENDING' && status !== 'PENDING') return false
-    if (filter === 'DIVERIFIKASI' && status !== 'DIVERIFIKASI') return false
-    if (filter === 'TERTOLAK' && status !== 'TERTOLAK') return false
+    const status = row.status || 'Pending'
+    if (filter === 'PENDING' && status !== 'Pending') return false
+    if (filter === 'DIVERIFIKASI' && status !== 'Verified') return false
+    if (filter === 'TERTOLAK' && status !== 'Rejected') return false
     if (search) {
       const searchLower = search.toLowerCase()
-      return (row[1] || '').toLowerCase().includes(searchLower) || (row[2] || '').toLowerCase().includes(searchLower)
+      return (row.nama || '').toLowerCase().includes(searchLower) 
+          || (row.email || '').toLowerCase().includes(searchLower)
+          || (row.ktp_number || '').includes(searchLower)
     }
     return true
   })
 
-  const pendingCount = data.filter(row => (row[4] || 'PENDING') === 'PENDING').length
+  const pendingCount = data.filter(row => (row.status || 'Pending') === 'Pending').length
 
   if (!isLoggedIn) {
     return (
@@ -115,6 +126,7 @@ export default function AdminPage() {
           <button className='btn-login' onClick={handleLogin} disabled={loading || pin.length < 4}>
             {loading ? 'Memeriksa...' : 'Masuk ke Dashboard'}
           </button>
+          <button onClick={() => navigate('form')} style={{marginTop: '20px', width:'100%', background:'transparent', border:'none', color:'var(--gray-500)', cursor:'pointer'}}>⬅ Kembali ke Form</button>
         </div>
       </div>
     )
@@ -134,13 +146,14 @@ export default function AdminPage() {
           <button className='btn-logout' onClick={() => { localStorage.removeItem('adminToken'); setIsLoggedIn(false); navigate('form') }}><span className='material-icons-round'>logout</span> Logout</button>
         </div>
       </aside>
+      
       <main className='main-content'>
         <header className='content-header'>
           <h1 className='page-title'>Data Responden</h1>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div className='search-box'>
               <span className='material-icons-round' style={{ color: 'var(--gray-400)' }}>search</span>
-              <input type='text' placeholder='Cari nama atau email...' value={search} onChange={(e) => setSearch(e.target.value)} />
+              <input type='text' placeholder='Cari nama, email, NIK...' value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
             <button className='btn-refresh' onClick={loadData}><span className='material-icons-round'>refresh</span></button>
           </div>
@@ -148,31 +161,30 @@ export default function AdminPage() {
         <div className='stats-grid'>
           <div className='stat-card' onClick={() => setFilter('ALL')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#6366f1,#818cf8)' }}><span className='material-icons-round'>people</span></div><div className='stat-info'><span className='stat-value'>{data.length}</span><span className='stat-label'>Total Masuk</span></div></div>
           <div className='stat-card' onClick={() => setFilter('PENDING')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#f59e0b,#fbbf24)' }}><span className='material-icons-round'>schedule</span></div><div className='stat-info'><span className='stat-value'>{pendingCount}</span><span className='stat-label'>Antrean</span></div></div>
-          <div className='stat-card' onClick={() => setFilter('DIVERIFIKASI')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#10b981,#34d399)' }}><span className='material-icons-round'>verified</span></div><div className='stat-info'><span className='stat-value'>{data.filter(r => r[4] === 'DIVERIFIKASI').length}</span><span className='stat-label'>Disetujui</span></div></div>
-          <div className='stat-card' onClick={() => setFilter('TERTOLAK')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#ef4444,#f87171)' }}><span className='material-icons-round'>cancel</span></div><div className='stat-info'><span className='stat-value'>{data.filter(r => r[4] === 'TERTOLAK').length}</span><span className='stat-label'>Ditolak</span></div></div>
+          <div className='stat-card' onClick={() => setFilter('DIVERIFIKASI')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#10b981,#34d399)' }}><span className='material-icons-round'>verified</span></div><div className='stat-info'><span className='stat-value'>{data.filter(r => r.status === 'Verified').length}</span><span className='stat-label'>Disetujui</span></div></div>
+          <div className='stat-card' onClick={() => setFilter('TERTOLAK')}><div className='stat-icon' style={{ background: 'linear-gradient(135deg,#ef4444,#f87171)' }}><span className='material-icons-round'>cancel</span></div><div className='stat-info'><span className='stat-value'>{data.filter(r => r.status === 'Rejected').length}</span><span className='stat-label'>Ditolak</span></div></div>
         </div>
         <div className='table-container'>
           <table className='data-table'>
-            <thead><tr><th>Responden</th><th>Email</th><th>Tanggal</th><th>Status</th><th>Aksi</th></tr></thead>
+            <thead><tr><th>Responden</th><th>Email</th><th>NIK KTP</th><th>Tanggal</th><th>Status</th><th>Aksi</th></tr></thead>
             <tbody>
-              {loading ? <tr><td colSpan='5' style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Memuat data...</td></tr> : filteredData.length === 0 ? <tr><td colSpan='5' style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Tidak ada data</td></tr> : filteredData.map((row, idx) => {
-                const actualIdx = data.indexOf(row)
-                return (
-                  <tr key={idx} onClick={() => openModal(row, actualIdx)}>
-                    <td><div className='name-cell'><div className='avatar'>{(row[1] || '?').charAt(0).toUpperCase()}</div>{row[1] || '-'}</div></td>
-                    <td>{row[2] || '-'}</td>
-                    <td>{row[0] ? new Date(row[0]).toLocaleDateString('id-ID') : '-'}</td>
-                    <td><span className={'status-badge ' + getStatusClass(row[4])}>{row[4] || 'PENDING'}</span></td>
+              {loading ? <tr><td colSpan='6' style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Memuat data...</td></tr> : filteredData.length === 0 ? <tr><td colSpan='6' style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Tidak ada data</td></tr> : filteredData.map((row) => (
+                  <tr key={row.id} onClick={() => openModal(row)}>
+                    <td><div className='name-cell'><div className='avatar'>{(row.nama || '?').charAt(0).toUpperCase()}</div>{row.nama}</div></td>
+                    <td>{row.email}</td>
+                    <td>{row.ktp_number || '-'}</td>
+                    <td>{new Date(row.created_at).toLocaleDateString('id-ID')}</td>
+                    <td><span className={'status-badge ' + getStatusClass(row.status)}>{row.status}</span></td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      <button className='action-btn' onClick={() => openModal(row, actualIdx)}><span className='material-icons-round'>visibility</span></button>
+                      <button className='action-btn' onClick={() => openModal(row)}><span className='material-icons-round'>visibility</span></button>
                     </td>
                   </tr>
-                )
-              })}
+              ))}
             </tbody>
           </table>
         </div>
       </main>
+
       <div className={'modal-overlay ' + (modalActive ? 'active' : '')} onClick={closeModal}>
         <div className='modal' onClick={(e) => e.stopPropagation()}>
           {selected && (
@@ -180,30 +192,56 @@ export default function AdminPage() {
               <div className='modal-header'><h2>Detail Responden</h2><button className='btn-close' onClick={closeModal}><span className='material-icons-round'>close</span></button></div>
               <div className='modal-body'>
                 <div className='detail-grid'>
-                  <div className='detail-item'><span className='detail-label'>Nama Lengkap</span><span className='detail-value'>{selected[1]}</span></div>
-                  <div className='detail-item'><span className='detail-label'>Alamat Email</span><span className='detail-value'>{selected[2]}</span></div>
-                  <div className='detail-item'><span className='detail-label'>Waktu Pendaftaran</span><span className='detail-value'>{selected[0] ? new Date(selected[0]).toLocaleString('id-ID') : '-'}</span></div>
-                  <div className='detail-item'><span className='detail-label'>Status Verifikasi</span><span className={'status-badge ' + getStatusClass(selected[4])}>{selected[4] || 'PENDING'}</span></div>
-                  {selected[3] && (
-                    <div className='detail-item full' style={{ marginTop: '15px' }}>
+                  <div className='detail-item'><span className='detail-label'>Nama Lengkap</span><span className='detail-value'>{selected.nama}</span></div>
+                  <div className='detail-item'><span className='detail-label'>Alamat Email</span><span className='detail-value'>{selected.email}</span></div>
+                  <div className='detail-item'><span className='detail-label'>NIK KTP</span><span className='detail-value'>{selected.ktp_number || '-'}</span></div>
+                  <div className='detail-item'><span className='detail-label'>Status Verifikasi</span><span className={'status-badge ' + getStatusClass(selected.status)}>{selected.status}</span></div>
+                  
+                  <div className='detail-item'><span className='detail-label'>Waktu Pendaftaran</span><span className='detail-value'>{new Date(selected.created_at).toLocaleString('id-ID')}</span></div>
+                  
+                  {selected.status !== 'Pending' && (
+                    <div className='detail-item'>
+                      <span className='detail-label'>Diproses Oleh & Waktu</span>
+                      <span className='detail-value'>
+                        {selected.processed_by || 'Admin'} <br/>
+                        <span style={{color:'var(--gray-500)', fontSize:'12px'}}>{selected.processed_at ? new Date(selected.processed_at).toLocaleString('id-ID') : '-'}</span>
+                      </span>
+                    </div>
+                  )}
+
+                  {selected.notes && (
+                    <div className='detail-item full'>
+                      <span className='detail-label'>Catatan Pendaftar</span>
+                      <div className='detail-value' style={{ background: '#fffbeb', padding: '12px', borderRadius: '8px', borderLeft: '4px solid #f59e0b', fontSize: '13px' }}>
+                        {selected.notes}
+                      </div>
+                    </div>
+                  )}
+
+                  {selected.ktp_image_url && (
+                    <div className='detail-item full' style={{ marginTop: '5px' }}>
                       <span className='detail-label'>Dokumen KTP</span>
                       <div style={{ background: 'var(--gray-50)', padding: '15px', borderRadius: '12px', border: '1px solid var(--gray-200)', textAlign: 'center', marginTop: '8px' }}>
-                        {selected[3].match(/\/d\/([a-zA-Z0-9-_]+)/) && (
-                          <div className='file-preview-container'><iframe src={'https://drive.google.com/file/d/' + selected[3].match(/\/d\/([a-zA-Z0-9-_]+)/)[1] + '/preview'} title='KTP Preview' style={{width:'100%', height:'250px', border:'none', borderRadius:'8px'}} /></div>
+                        {selected.ktp_image_url.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? (
+                          <img src={selected.ktp_image_url} alt="KTP" style={{ width: '100%', maxHeight: '300px', objectFit: 'contain', borderRadius: '8px' }} />
+                        ) : (
+                          <div style={{ padding: '20px' }}><span className='material-icons-round' style={{fontSize:'40px', color:'var(--gray-400)'}}>description</span><p>Dokumen File</p></div>
                         )}
-                        <a href={selected[3]} target='_blank' rel='noreferrer' className='open-file-btn' style={{ marginTop: '12px', display:'inline-flex', alignItems:'center', gap:'8px', textDecoration:'none', color:'var(--primary)', fontWeight:'bold', border:'1px solid var(--gray-200)', padding:'8px 16px', borderRadius:'8px' }}><span className='material-icons-round' style={{ fontSize: '18px' }}>open_in_new</span> Buka File Penuh</a>
+                        <a href={selected.ktp_image_url} target='_blank' rel='noreferrer' className='open-file-btn' style={{ marginTop: '12px', display:'inline-flex', alignItems:'center', gap:'8px', textDecoration:'none', color:'var(--primary)', fontWeight:'bold', border:'1px solid var(--gray-200)', padding:'8px 16px', borderRadius:'8px' }}><span className='material-icons-round' style={{ fontSize: '18px' }}>open_in_new</span> Lihat Dokumen Penuh</a>
                       </div>
                     </div>
                   )}
                 </div>
               </div>
               <div className='modal-footer'>
-                {(selected[4] || 'PENDING') === 'PENDING' ? (
+                <button className='btn-action reject' onClick={() => handleDelete(selected.id)} style={{background: 'transparent', color: 'var(--danger)', border: '1px solid var(--danger)', marginRight: 'auto'}}><span className='material-icons-round' style={{ fontSize: '18px' }}>delete</span> Hapus Data</button>
+                
+                {selected.status === 'Pending' ? (
                   <>
-                    <button className='btn-action reject' onClick={() => { handleVerifikasi(selected.index, 'TERTOLAK'); closeModal() }}><span className='material-icons-round' style={{ fontSize: '18px' }}>close</span> Tolak Data</button>
-                    <button className='btn-action approve' onClick={() => { handleVerifikasi(selected.index, 'DIVERIFIKASI'); closeModal() }}><span className='material-icons-round' style={{ fontSize: '18px' }}>check</span> Setujui Data</button>
+                    <button className='btn-action reject' onClick={() => handleVerifikasi(selected.id, 'Rejected')}><span className='material-icons-round' style={{ fontSize: '18px' }}>close</span> Tolak</button>
+                    <button className='btn-action approve' onClick={() => handleVerifikasi(selected.id, 'Verified')}><span className='material-icons-round' style={{ fontSize: '18px' }}>check</span> Setujui</button>
                   </>
-                ) : <div style={{ color: 'var(--gray-500)', fontSize: '14px', padding: '10px' }}>Data telah diproses.</div>}
+                ) : <div style={{ color: 'var(--gray-500)', fontSize: '14px', padding: '10px' }}>Status telah diproses.</div>}
               </div>
             </>
           )}
