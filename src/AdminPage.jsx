@@ -1,4 +1,4 @@
-import { useState, useContext, useEffect, useCallback } from 'react'
+import { useState, useContext, useCallback, useEffect } from 'react'
 import { AppContext } from './App'
 
 export default function AdminPage() {
@@ -15,21 +15,23 @@ export default function AdminPage() {
   const handleLogin = async () => {
     setLoading(true)
     try {
+      // --- PERUBAHAN UTAMA: Memanggil API Vercel lokal untuk verifikasi PIN ---
       const resp = await fetch('/api/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'cekLogin', payload: { pin } })
       })
       const result = await resp.json()
+      
       if (result.success) {
         localStorage.setItem('adminToken', 'true')
         setIsLoggedIn(true)
         loadData()
       } else {
-        alert('PIN Salah')
+        alert(result.message || 'PIN Salah')
       }
     } catch (e) {
-      alert("Gagal menghubungi server.")
+      alert('Gagal menghubungi server untuk Login.')
     }
     setLoading(false)
   }
@@ -45,7 +47,7 @@ export default function AdminPage() {
       const result = await resp.json()
       if (result.success) { setData(result.data) }
     } catch (err) {
-      console.error(err)
+      console.error('Gagal load data:', err)
     }
     setLoading(false)
   }, [])
@@ -64,10 +66,12 @@ export default function AdminPage() {
       })
       const result = await resp.json()
       if (result.success) {
-        loadData() // Muat ulang data untuk merefleksikan perubahan
+        loadData()
+      } else {
+        alert("Gagal update status: " + result.message)
       }
-    } catch (err) {
-      alert("Gagal update status")
+    } catch (e) {
+      alert("Error jaringan saat update status.")
     }
     setLoading(false)
   }
@@ -81,7 +85,7 @@ export default function AdminPage() {
   const openModal = (entry, idx) => { setSelected({ ...entry, index: idx }); setModalActive(true) }
   const closeModal = () => { setModalActive(false); setTimeout(() => setSelected(null), 300) }
 
-  // [0]=Waktu, [1]=Nama, [2]=Email, [3]=Link KTP, [4]=Status
+  // Mapping Kolom: [0]=Waktu, [1]=Nama, [2]=Email, [3]=Link, [4]=Status
   const filteredData = data.filter(row => {
     const status = row[4] || 'PENDING'
     if (filter === 'PENDING' && status !== 'PENDING') return false
@@ -111,7 +115,6 @@ export default function AdminPage() {
           <button className='btn-login' onClick={handleLogin} disabled={loading || pin.length < 4}>
             {loading ? 'Memeriksa...' : 'Masuk ke Dashboard'}
           </button>
-          <button onClick={() => navigate('form')} style={{marginTop: '20px', width:'100%', background:'transparent', border:'none', color:'var(--gray-500)', cursor:'pointer'}}>⬅ Kembali ke Form</button>
         </div>
       </div>
     )
@@ -139,7 +142,7 @@ export default function AdminPage() {
               <span className='material-icons-round' style={{ color: 'var(--gray-400)' }}>search</span>
               <input type='text' placeholder='Cari nama atau email...' value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            <button className='btn-refresh' onClick={loadData} disabled={loading}><span className='material-icons-round'>refresh</span></button>
+            <button className='btn-refresh' onClick={loadData}><span className='material-icons-round'>refresh</span></button>
           </div>
         </header>
         <div className='stats-grid'>
@@ -186,9 +189,7 @@ export default function AdminPage() {
                       <span className='detail-label'>Dokumen KTP</span>
                       <div style={{ background: 'var(--gray-50)', padding: '15px', borderRadius: '12px', border: '1px solid var(--gray-200)', textAlign: 'center', marginTop: '8px' }}>
                         {selected[3].match(/\/d\/([a-zA-Z0-9-_]+)/) && (
-                          <div className='file-preview-container'>
-                            <iframe src={'https://drive.google.com/file/d/' + selected[3].match(/\/d\/([a-zA-Z0-9-_]+)/)[1] + '/preview'} title='KTP Preview' style={{width:'100%', height:'250px', border:'none', borderRadius:'8px'}} />
-                          </div>
+                          <div className='file-preview-container'><iframe src={'https://drive.google.com/file/d/' + selected[3].match(/\/d\/([a-zA-Z0-9-_]+)/)[1] + '/preview'} title='KTP Preview' style={{width:'100%', height:'250px', border:'none', borderRadius:'8px'}} /></div>
                         )}
                         <a href={selected[3]} target='_blank' rel='noreferrer' className='open-file-btn' style={{ marginTop: '12px', display:'inline-flex', alignItems:'center', gap:'8px', textDecoration:'none', color:'var(--primary)', fontWeight:'bold', border:'1px solid var(--gray-200)', padding:'8px 16px', borderRadius:'8px' }}><span className='material-icons-round' style={{ fontSize: '18px' }}>open_in_new</span> Buka File Penuh</a>
                       </div>

@@ -53,6 +53,7 @@ export default function FormPage() {
       }
       
       try {
+        // --- PERUBAHAN UTAMA: Memanggil API Vercel lokal ---
         const response = await fetch('/api/google', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -61,13 +62,13 @@ export default function FormPage() {
         const data = await response.json()
         
         if (data.success) { 
-          alert('Berhasil Dikirim! Data Anda telah tersimpan.') 
+          alert('Berhasil Dikirim! Data Anda telah tersimpan di Google Spreadsheet.') 
           e.target.reset(); setForm({ nama: '', email: '' }); removeFile(); createConfetti() 
         } else {
-          alert('Gagal mengirim: ' + data.message)
+          alert('Gagal mengirim ke server: ' + data.message)
         }
       } catch (err) {
-        alert('Gagal menghubungi server API.')
+        alert('Gagal terhubung ke API Vercel.')
       }
       setLoading(false)
     }
@@ -78,46 +79,20 @@ export default function FormPage() {
     <div className='form-page'>
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px' }}>
         <div className='form-card'>
-          <div className='form-header'>
-            <div className='form-icon'><span className='material-icons-round'>badge</span></div>
-            <h1>Registrasi Data</h1>
-            <p>Lengkapi formulir dengan data yang valid</p>
-          </div>
+          <div className='form-header'><div className='form-icon'><span className='material-icons-round'>badge</span></div><h1>Registrasi Data</h1><p>Lengkapi formulir dengan data yang valid</p></div>
           <form onSubmit={handleSubmit}>
-            <div className='form-group'>
-              <label className='form-label'>Nama Lengkap <span className='required'>*</span></label>
-              <input type='text' className='form-input' placeholder='Masukkan nama sesuai KTP' value={form.nama} onChange={(e) => setForm({ ...form, nama: e.target.value })} required />
-            </div>
-            <div className='form-group'>
-              <label className='form-label'>Alamat Email <span className='required'>*</span></label>
-              <input type='email' className='form-input' placeholder='nama@email.com' value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
-            </div>
+            <div className='form-group'><label className='form-label'>Nama Lengkap <span className='required'>*</span></label><input type='text' className='form-input' placeholder='Masukkan nama sesuai KTP' value={form.nama} onChange={(e) => setForm({ ...form, nama: e.target.value })} required /></div>
+            <div className='form-group'><label className='form-label'>Alamat Email <span className='required'>*</span></label><input type='email' className='form-input' placeholder='nama@email.com' value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></div>
             <div className='form-group'>
               <label className='form-label'>Dokumen KTP <span className='required'>*</span></label>
               <input type='file' id='ktpFile' accept='image/*,.pdf' onChange={(e) => handleFileChange(e.target.files[0])} style={{ display: 'none' }} />
-              {!file ? (
-                <div className={'upload-zone ' + (dragOver ? 'dragover' : '')} onClick={() => document.getElementById('ktpFile').click()} onDragOver={(e) => { e.preventDefault(); setDragOver(true) }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
-                  <div className='upload-icon'><span className='material-icons-round'>upload_file</span></div>
-                  <p className='upload-text'>Seret file ke sini atau <strong>pilih file</strong></p>
-                  <p className='upload-hint'>Format: JPG, PNG, PDF (maks. 3MB)</p>
-                </div>
-              ) : (
-                <div className='preview-container show'>
-                  {preview && <img src={preview} alt='Preview' style={{width: '100%', borderRadius: '12px'}}/>}
-                  <div className='preview-info'>
-                    <span className='file-name'><span className='material-icons-round' style={{color:'var(--success)'}}>check_circle</span> {file.name}</span>
-                    <button type='button' className='btn-remove' onClick={removeFile}><span className='material-icons-round'>delete</span></button>
-                  </div>
-                </div>
-              )}
+              {!file ? (<div className={'upload-zone ' + (dragOver ? 'dragover' : '')} onClick={() => document.getElementById('ktpFile').click()} onDragOver={(e) => { e.preventDefault(); setDragOver(true) }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop}><div className='upload-icon'><span className='material-icons-round'>upload_file</span></div><p className='upload-text'>Seret file ke sini atau <strong>pilih file</strong></p><p className='upload-hint'>Format: JPG, PNG, PDF (maks. 3MB)</p></div>) : (<div className='preview-container show'>{preview && <img src={preview} alt='Preview' />}<div className='preview-info'><span className='file-name'><span className='material-icons-round'>check_circle</span>{file.name}</span><button type='button' className='btn-remove' onClick={removeFile}><span className='material-icons-round'>delete</span></button></div></div>)}
             </div>
-            <button type='submit' className='btn-submit' disabled={loading}>
-              {loading ? <><div className='spinner'></div>Mengunggah...</> : <><span className='material-icons-round'>send</span>Kirim Data</>}
-            </button>
+            <button type='submit' className='btn-submit' disabled={loading}>{loading ? <><div className='spinner'></div>Mengunggah...</> : <><span className='material-icons-round'>send</span>Kirim Data</>}</button>
           </form>
         </div>
       </div>
-      <button className='admin-link' onClick={() => navigate('admin')}><span className='material-icons-round'>admin_panel_settings</span>Admin Panel</button>
+      <button className='admin-link' onClick={() => navigate('login')}><span className='material-icons-round'>admin_panel_settings</span>Admin Panel</button>
     </div>
   )
 }
